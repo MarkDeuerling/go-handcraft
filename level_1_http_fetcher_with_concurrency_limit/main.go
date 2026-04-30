@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -44,6 +45,7 @@ func asyncFetch(url string, ch chan<- result) {
 		return
 	}
 	defer resp.Body.Close()
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		ch <- result{URL: url, Err: err}
@@ -54,6 +56,30 @@ func asyncFetch(url string, ch chan<- result) {
 		StatusCode: resp.StatusCode,
 		BodyLength: int(resp.ContentLength),
 		Body:       body,
+		Err:        nil,
+	}
+}
+
+func asyncFetchWithCancelation(ctx context.Context, url string, ch chan<- result) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		ch <- result{URL: url, Err: err}
+		return
+	}
+	client := http.Client{
+		Timeout: 5 * time.Second,
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		ch <- result{URL: url, Err: err}
+		return
+	}
+	defer resp.Body.Close()
+
+	ch <- result{
+		URL:        url,
+		StatusCode: resp.StatusCode,
+		BodyLength: int(resp.ContentLength),
 		Err:        nil,
 	}
 }
@@ -76,7 +102,25 @@ func fetchAsync(urls []string) {
 	}
 	for range urls {
 		res := <-ch
-		fmt.Println(res.URL, res.StatusCode, res.BodyLength, string(res.Body), res.Err)
+		fmt.Println(res.URL, res.StatusCode, res.BodyLength, res.Err)
+	}
+}
+
+func fetchAsyncWithCancelation(urls []string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := make(chan result)
+
+	for _, url := range urls {
+		go asyncFetchWithCancelation(ctx, url, ch)
+	}
+
+	for range urls {
+		res := <-ch
+		if res.StatusCode >= 500 {
+			cancel()
+		}
+		fmt.Println(res.URL, res.StatusCode, res.BodyLength, res.Err)
 	}
 }
 
@@ -94,7 +138,7 @@ func main() {
 		"https://httpbin.org/delay/1",
 	}
 
-	fetchAsync(urls)
+	fetchAsyncWithCancelation(urls)
 
 	// fetchSync(urls)
 
