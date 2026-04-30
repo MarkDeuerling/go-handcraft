@@ -69,18 +69,30 @@ func asyncFetchWithCancelation(ctx context.Context, url string, ch chan<- result
 	client := http.Client{
 		Timeout: 5 * time.Second,
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		ch <- result{URL: url, Err: err}
-		return
-	}
-	defer resp.Body.Close()
+	resChan := make(chan result, 1)
+	go func() {
+		resp, err := client.Do(req)
+		if err != nil {
+			resChan <- result{URL: url, Err: err}
+			return
+		}
+		defer resp.Body.Close()
 
-	ch <- result{
-		URL:        url,
-		StatusCode: resp.StatusCode,
-		BodyLength: int(resp.ContentLength),
-		Err:        nil,
+		resChan <- result{
+			URL:        url,
+			StatusCode: resp.StatusCode,
+			BodyLength: int(resp.ContentLength),
+			Err:        nil,
+		}
+	}()
+
+	select {
+	case res := <-resChan:
+		ch <- res
+	case <-ctx.Done():
+		ch <- result{URL: url, Err: ctx.Err()}
+	case <-time.After(2 * time.Second):
+		ch <- result{URL: url, Err: fmt.Errorf("timed out")}
 	}
 }
 
@@ -117,9 +129,9 @@ func fetchAsyncWithCancelation(urls []string) {
 
 	for range urls {
 		res := <-ch
-		if res.StatusCode >= 500 {
-			cancel()
-		}
+		// if res.StatusCode >= 500 {
+		// 	cancel()
+		// }
 		fmt.Println(res.URL, res.StatusCode, res.BodyLength, res.Err)
 	}
 }
