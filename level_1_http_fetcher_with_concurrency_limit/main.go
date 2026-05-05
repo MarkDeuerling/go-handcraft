@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 )
@@ -136,6 +138,55 @@ func fetchAsyncWithCancelation(urls []string) {
 	}
 }
 
+func fetchWithRetry(maxRetries int, url string) (*result, error) {
+	var lastErr error
+	for i := range maxRetries {
+		attempt := i
+		res, err := syncFetch(url)
+
+		if err == nil {
+			return res, nil
+		}
+
+		lastErr = err
+
+		if !isRetryable(err) {
+			return res, err
+		}
+
+		if attempt <= maxRetries {
+			backoff := time.Duration(attempt+1) * 100 * time.Millisecond
+			time.Sleep(backoff)
+		}
+	}
+	return nil, fmt.Errorf("Failed after  %d retries: %w", maxRetries, lastErr)
+}
+
+func isRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	if _, ok := errors.AsType[net.Error](err); ok {
+		return true
+	}
+	return false
+}
+
+func fetchWithRetrySync(urls []string) {
+	for _, url := range urls {
+		res, err := fetchWithRetry(3, url)
+		if err != nil {
+			fmt.Println("Fehler:", err)
+		} else {
+			fmt.Println(res)
+		}
+	}
+}
+
 func main() {
 	urls := []string{
 		"https://httpbin.org/delay/1",
@@ -150,7 +201,8 @@ func main() {
 		"https://httpbin.org/delay/1",
 	}
 
-	fetchAsyncWithCancelation(urls)
+	fetchWithRetrySync(urls)
+	// fetchAsyncWithCancelation(urls)
 
 	// fetchSync(urls)
 
