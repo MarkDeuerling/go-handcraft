@@ -140,8 +140,9 @@ func fetchAsyncWithCancelation(urls []string) {
 
 func fetchWithRetry(maxRetries int, url string) (*result, error) {
 	var lastErr error
-	for i := range maxRetries {
-		attempt := i
+	var attempt int
+	for i := 0; i <= maxRetries; i++ {
+		attempt = i
 		res, err := syncFetch(url)
 
 		if err == nil {
@@ -151,15 +152,17 @@ func fetchWithRetry(maxRetries int, url string) (*result, error) {
 		lastErr = err
 
 		if !isRetryable(err) {
+			fmt.Printf("[STOP] not retryable\n")
 			return res, err
 		}
 
-		if attempt <= maxRetries {
+		if attempt < maxRetries {
 			backoff := time.Duration(attempt+1) * 100 * time.Millisecond
+			fmt.Printf("[RETRY] sleeping %v\n", backoff)
 			time.Sleep(backoff)
 		}
 	}
-	return nil, fmt.Errorf("Failed after  %d retries: %w", maxRetries, lastErr)
+	return nil, fmt.Errorf("Failed after %d retries: %w", attempt, lastErr)
 }
 
 func isRetryable(err error) bool {
@@ -187,6 +190,17 @@ func fetchWithRetrySync(urls []string) {
 	}
 }
 
+func rateLimit(urls []string) {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	for _, url := range urls {
+		<-ticker.C
+		go func(u string) {
+			res, err := syncFetch(u)
+			fmt.Println(u, res, err)
+		}(url)
+	}
+}
+
 func main() {
 	urls := []string{
 		"https://httpbin.org/delay/1",
@@ -201,7 +215,8 @@ func main() {
 		"https://httpbin.org/delay/1",
 	}
 
-	fetchWithRetrySync(urls)
+	rateLimit(urls)
+	// fetchWithRetrySync(urls)
 	// fetchAsyncWithCancelation(urls)
 
 	// fetchSync(urls)
